@@ -1,36 +1,34 @@
-const fs = require('fs');
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
-async function scrapeChangelog() {
+// Configuration
+const BASE_URL = 'https://developers.facebook.com/docs/graph-api/changelog/non-versioned-changes/nvc-';
+const START_YEAR = 2023; // Earliest available year
+const OUTPUT_DIR = 'output';
+
+async function generateYearUrls() {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let year = START_YEAR; year <= currentYear; year++) {
+        years.push({
+            year: year,
+            url: `${BASE_URL}${year}`
+        });
+    }
+    return years;
+}
+
+async function scrapeChangelog(page, url) {
     try {
-        console.log('Launching browser...');
-        const browser = await puppeteer.launch({
-            headless: 'new',  // Use the new headless mode
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-
-        const page = await browser.newPage();
-        
-        // Set a realistic viewport
-        await page.setViewport({
-            width: 1280,
-            height: 800
-        });
-
-        console.log('Navigating to page...');
-        await page.goto('https://developers.facebook.com/docs/graph-api/changelog/non-versioned-changes/nvc-2024', {
-            waitUntil: 'networkidle0'
+        console.log(`Navigating to ${url}...`);
+        await page.goto(url, {
+            waitUntil: 'networkidle0',
+            timeout: 30000
         });
 
         // Wait for the content to load
         await page.waitForSelector('h2');
-
-        // Get the HTML content
-        const html = await page.content();
-        
-        // Save the raw HTML
-        fs.writeFileSync('changelog.html', html);
-        console.log('Raw HTML saved to changelog.html');
 
         // Extract the changelog data
         const changes = await page.evaluate(() => {
@@ -86,24 +84,88 @@ async function scrapeChangelog() {
             return changesList;
         });
 
-        const result = {
-            total_changes: changes.length,
-            last_updated: changes[0]?.date || 'Unknown',
-            changes: changes
-        };
-
-        // Write to JSON file
-        fs.writeFileSync('changelog.json', JSON.stringify(result, null, 2));
-        console.log('Changelog has been scraped and saved to changelog.json');
-        console.log(`Total changes found: ${result.total_changes}`);
-        console.log(`Last updated: ${result.last_updated}`);
-
-        await browser.close();
+        return changes;
 
     } catch (error) {
-        console.error('Error scraping changelog:', error);
+        console.error(`Error scraping ${url}:`, error.message);
+        return [];
+    }
+}
+
+async function saveResults(year, changes) {
+    // Create output directory if it doesn't exist
+    if (!fs.existsSync(OUTPUT_DIR)) {
+        fs.mkdirSync(OUTPUT_DIR);
+    }
+
+    const yearData = {
+        year: year,
+        total_changes: changes.length,
+        last_updated: changes[0]?.date || 'Unknown',
+        changes: changes
+    };
+
+    // Save individual year file
+    const yearFilePath = path.join(OUTPUT_DIR, `changelog_${year}.json`);
+    fs.writeFileSync(yearFilePath, JSON.stringify(yearData, null, 2));
+    console.log(`Saved ${year} changelog to ${yearFilePath}`);
+
+    return yearData;
+}
+
+async function generateMasterChangelog(allYearData) {
+    const masterData = {
+        last_updated: new Date().toISOString(),
+        total_years: allYearData.length,
+        total_changes: allYearData.reduce((sum, year) => sum + year.total_changes, 0),
+        years: allYearData.sort((a, b) => b.year - a.year) // Sort newest first
+    };
+
+    const masterFilePath = path.join(OUTPUT_DIR, 'changelog_master.json');
+    fs.writeFileSync(masterFilePath, JSON.stringify(masterData, null, 2));
+    console.log(`Saved master changelog to ${masterFilePath}`);
+}
+
+async function main() {
+    try {
+        console.log('Starting changelog scraper...');
+        
+        // Generate URLs for all years
+        const yearUrls = await generateYearUrls();
+        console.log(`Found ${yearUrls.length} years to scrape`);
+
+        // Launch browser
+        const browser = await puppeteer.launch({
+            headless: 'new',
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 800 });
+
+        // Scrape each year
+        const allYearData = [];
+        for (const { year, url } of yearUrls) {
+            console.log(`\nProcessing year ${year}...`);
+            
+            const changes = await scrapeChangelog(page, url);
+            if (changes.length > 0) {
+                const yearData = await saveResults(year, changes);
+                allYearData.push(yearData);
+            }
+        }
+
+        // Generate master changelog
+        await generateMasterChangelog(allYearData);
+
+        await browser.close();
+        console.log('\nScraping completed successfully!');
+
+    } catch (error) {
+        console.error('Fatal error:', error);
+        process.exit(1);
     }
 }
 
 // Run the scraper
-scrapeChangelog();
+main();

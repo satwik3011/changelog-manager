@@ -1,0 +1,80 @@
+{
+  "year": 2023,
+  "total_changes": 6,
+  "last_updated": "September 15, 2023",
+  "changes": [
+    {
+      "date": "September 15, 2023",
+      "type": "User Accounts",
+      "endpoints": [
+        "GET /{user-id}/accounts",
+        "GET /me/accounts"
+      ],
+      "details": [
+        "This change reduces the scope of the User Accounts change introduced with version 17. That change now only applies to v17.0 and later.",
+        "Applies to v17.0 and later versions. Will apply to all versions when version 19 is released (date to be determined).",
+        "The GET /{user-id}/accounts (aka GET /me/accounts) endpoint no longer returns Facebook pages that have been linked to a Meta business account, unless the app user has granted the business_management permission to the app and has a role on the linked business account."
+      ]
+    },
+    {
+      "date": "June 15, 2023",
+      "type": "Ads that Click to Messenger",
+      "endpoints": [],
+      "details": [
+        "Call Prompt",
+        "You can now add a call prompt to allow customers or people interested in your business to call your business.",
+        "Click to Subscribe",
+        "You can now create ads that include a click to subscribe flow that allow you to ask customers or people interested in your business to opt in to receiving marketing messages."
+      ]
+    },
+    {
+      "date": "June 15, 2023",
+      "type": "Messenger Platform",
+      "endpoints": [],
+      "details": [
+        "Multi App Routing",
+        "Multi App Routing is now available for Instagram Direct and Messenger."
+      ]
+    },
+    {
+      "date": "June 15, 2023",
+      "type": "Reels API",
+      "endpoints": [
+        "POST",
+        "/",
+        "page-id",
+        "/video_reels",
+        "description"
+      ],
+      "details": [
+        "Hashtags are now supported in the POST /page-id/video_reels description field.\nYou can now crosspost Reels to Facebook Pages."
+      ]
+    },
+    {
+      "date": "June 6, 2023",
+      "type": "Instagram Ads API",
+      "endpoints": [
+        "“instagram_positions”: [“shop”]"
+      ],
+      "details": [
+        "Instagram Shop tab placement",
+        "The Instagram Shop tab ad placement (“instagram_positions”: [“shop”]) is no longer available for new ad campaigns.",
+        "This change affects the following endpoints when creating ads:",
+        "POST /{ad-accout-id}/adsets\nPOST /ad_set_id\nGET /{ad-id}/previews\nGET /{ad-account-id}/generatepreviews"
+      ]
+    },
+    {
+      "date": "April 10, 2023",
+      "type": "Pages API Metrics",
+      "endpoints": [
+        "page_impressions_organic",
+        "page_impressions_organic_v2",
+        "page_impressions_organic_unique",
+        "page_impressions_organic_unique_v2"
+      ],
+      "details": [
+        "page_impressions_organic renamed to page_impressions_organic_v2\npage_impressions_organic_unique renamed to page_impressions_organic_unique_v2"
+      ]
+    }
+  ]
+}

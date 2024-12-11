@@ -1,140 +1,297 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
-const path = require('path');
 
 // Configuration
-const BASE_URL = 'https://developers.facebook.com/docs/graph-api/changelog/non-versioned-changes/nvc-';
-const START_YEAR = 2023; // Earliest available year
-const OUTPUT_DIR = 'output';
+const META_BASE_URL = 'https://developers.facebook.com/docs/graph-api/changelog/non-versioned-changes/nvc-';
+const YOUTUBE_CHANGELOG_URL = 'https://developers.google.com/youtube/v3/revision_history';
+const START_YEAR = 2023;
+const OUTPUT_FILE = 'changelog.json';
 
-async function generateYearUrls() {
-    const currentYear = new Date().getFullYear();
-    const years = [];
-    for (let year = START_YEAR; year <= currentYear; year++) {
-        years.push({
-            year: year,
-            url: `${BASE_URL}${year}`
-        });
+function determineChangeType(title, details) {
+    // Helper function to categorize changes
+    if (title.toLowerCase().includes('deprecat') || details.some(d => d.toLowerCase().includes('deprecat'))) {
+        return 'Deprecation';
     }
-    return years;
+    if (title.toLowerCase().includes('api')) {
+        return 'API Update';
+    }
+    return 'Feature Update';
 }
 
-async function scrapeChangelog(page, url) {
+async function scrapeChangelog(page, url, year) {
     try {
-        console.log(`Navigating to ${url}...`);
+        console.log(`\nScraping changelog for ${year}...`);
         await page.goto(url, {
             waitUntil: 'networkidle0',
             timeout: 30000
         });
 
-        // Wait for the content to load
-        await page.waitForSelector('h2');
-
         // Extract the changelog data
         const changes = await page.evaluate(() => {
-            const changesList = [];
-            
-            // Find all h2 elements (date sections)
+            const changes = [];
             const dateSections = document.querySelectorAll('h2');
             
             dateSections.forEach(dateSection => {
                 const dateText = dateSection.textContent.trim();
-                
-                // Skip if this isn't a date heading
                 if (!dateText.match(/[A-Za-z]+ \d+, \d{4}/)) return;
                 
-                // Get the next elements until another h2
                 let currentNode = dateSection.nextElementSibling;
+                let currentChange = null;
+
                 while (currentNode && currentNode.tagName !== 'H2') {
                     if (currentNode.tagName === 'H3') {
-                        const changeType = currentNode.textContent.trim();
-                        
-                        // Collect details and endpoints
-                        const details = [];
-                        const endpoints = [];
-                        
-                        let nextNode = currentNode.nextElementSibling;
-                        while (nextNode && !['H2', 'H3'].includes(nextNode.tagName)) {
-                            // Extract endpoints from code blocks
-                            nextNode.querySelectorAll('code').forEach(code => {
-                                const endpoint = code.textContent.trim();
-                                if (endpoint) endpoints.push(endpoint);
-                            });
-                            
-                            // Extract other content as details
-                            const text = nextNode.textContent.trim();
-                            if (text && !endpoints.includes(text)) {
-                                details.push(text);
-                            }
-                            
-                            nextNode = nextNode.nextElementSibling;
+                        if (currentChange) {
+                            changes.push(currentChange);
                         }
                         
-                        changesList.push({
+                        currentChange = {
                             date: dateText,
-                            type: changeType,
-                            endpoints: endpoints,
-                            details: details.filter(d => d.length > 0)
+                            title: currentNode.textContent.trim(),
+                            raw_endpoints: [],
+                            details: [],
+                            links: [],
+                            isDeprecation: currentNode.closest('.deprecation-announcement') !== null
+                        };
+                    } else if (currentChange) {
+                        // Extract code blocks for endpoints
+                        const codeBlocks = currentNode.querySelectorAll('code');
+                        codeBlocks.forEach(code => {
+                            const endpoint = code.textContent.trim();
+                            if (endpoint) {
+                                currentChange.raw_endpoints.push(endpoint);
+                            }
                         });
+                        
+                        // Extract links
+                        const links = currentNode.querySelectorAll('a');
+                        links.forEach(link => {
+                            currentChange.links.push({
+                                text: link.textContent.trim(),
+                                url: link.href
+                            });
+                        });
+                        
+                        // Extract text content
+                        const text = currentNode.textContent.trim();
+                        if (text) {
+                            currentChange.details.push(text);
+                        }
                     }
                     currentNode = currentNode.nextElementSibling;
                 }
+                
+                if (currentChange) {
+                    changes.push(currentChange);
+                }
             });
             
-            return changesList;
+            return changes;
         });
 
-        return changes;
+        // Process and format the changes according to our schema
+        return changes.map(change => {
+            // Parse endpoints into structured format
+            const endpoints = change.raw_endpoints.map(endpoint => {
+                const parts = endpoint.split(' ');
+                return {
+                    method: parts[0] || '',
+                    path: parts[1] || endpoint,
+                    status: 'active'
+                };
+            });
+
+            // Determine if this is a breaking change
+            const isBreaking = change.details.some(d => 
+                d.toLowerCase().includes('breaking') || 
+                d.toLowerCase().includes('deprecated') ||
+                d.toLowerCase().includes('removed')
+            );
+
+            return {
+                platform: 'Meta',
+                date: change.date,
+                year: parseInt(change.date.split(', ')[1]),
+                title: change.title,
+                type: determineChangeType(change.title, change.details),
+                
+                version_info: {
+                    applies_to: null,  // Meta doesn't typically specify this in changelog
+                    effective_date: null
+                },
+
+                endpoints: endpoints,
+                fields: [],  // Could be enhanced to detect field changes
+
+                description: change.details[0] || '',  // First detail is usually the main description
+                details: change.details.slice(1),  // Remaining details
+                
+                links: change.links,
+
+                flags: {
+                    is_deprecation: change.isDeprecation,
+                    is_breaking_change: isBreaking,
+                    requires_action: isBreaking
+                },
+
+                platform_specific: {
+                    products: ['Graph API']
+                }
+            };
+        });
 
     } catch (error) {
-        console.error(`Error scraping ${url}:`, error.message);
+        console.error(`Error scraping ${year}:`, error.message);
         return [];
     }
 }
 
-async function saveResults(year, changes) {
-    // Create output directory if it doesn't exist
-    if (!fs.existsSync(OUTPUT_DIR)) {
-        fs.mkdirSync(OUTPUT_DIR);
+async function scrapeYouTubeChangelog(page) {
+    try {
+        console.log('\nScraping YouTube changelog...');
+        await page.goto(YOUTUBE_CHANGELOG_URL, {
+            waitUntil: 'networkidle0',
+            timeout: 30000
+        });
+
+        // Extract the changelog data
+        const changes = await page.evaluate((startYear) => {
+            const changes = [];
+            const releaseNotes = document.querySelectorAll('a[name^="release_notes_"]');
+            
+            for (const anchor of releaseNotes) {
+                // Get the next h3 element which contains the date
+                const dateHeader = anchor.nextElementSibling;
+                if (!dateHeader || !dateHeader.tagName === 'H3') continue;
+
+                const dateText = dateHeader.textContent.trim();
+                const date = new Date(dateText);
+                const year = date.getFullYear();
+
+                // Skip changes before startYear
+                if (year < startYear) continue;
+
+                // Initialize the change object
+                let currentChange = {
+                    date: dateText,
+                    title: '', // Will be determined based on content
+                    details: [],
+                    endpoints: [],
+                    links: []
+                };
+
+                // Process content until next release note or major section
+                let currentNode = dateHeader.nextElementSibling;
+                while (currentNode && 
+                       !currentNode.matches('a[name^="release_notes_"]') && 
+                       !currentNode.matches('h2')) {
+                    
+                    // Extract text content
+                    if (currentNode.textContent.trim()) {
+                        // If this is the first content and we don't have a title,
+                        // use it as title, otherwise add to details
+                        if (!currentChange.title && currentNode.tagName !== 'P') {
+                            currentChange.title = currentNode.textContent.trim();
+                        } else {
+                            currentChange.details.push(currentNode.textContent.trim());
+                        }
+                    }
+
+                    // Extract endpoints from code blocks
+                    const codeBlocks = currentNode.querySelectorAll('code');
+                    codeBlocks.forEach(code => {
+                        const endpoint = code.textContent.trim();
+                        if (endpoint) {
+                            currentChange.endpoints.push(endpoint);
+                        }
+                    });
+
+                    // Extract links
+                    const links = currentNode.querySelectorAll('a');
+                    links.forEach(link => {
+                        currentChange.links.push({
+                            text: link.textContent.trim(),
+                            url: link.href
+                        });
+                    });
+
+                    currentNode = currentNode.nextElementSibling;
+                }
+
+                // If we gathered any meaningful content, add to changes
+                if (currentChange.details.length > 0) {
+                    changes.push(currentChange);
+                }
+            }
+            
+            return changes;
+        }, START_YEAR);
+
+        // Process and format the changes according to our schema
+        return changes.map(change => {
+            // Analyze content to determine change type
+            const isDeprecation = change.details.some(d => 
+                d.toLowerCase().includes('deprecat') ||
+                d.toLowerCase().includes('will stop supporting')
+            );
+            
+            const isBreaking = isDeprecation || change.details.some(d => 
+                d.toLowerCase().includes('breaking') || 
+                d.toLowerCase().includes('removed')
+            );
+
+            // Format endpoints into structured format
+            const endpoints = change.endpoints.map(endpoint => {
+                const parts = endpoint.split(' ');
+                return {
+                    method: parts[0] || '',
+                    path: parts[1] || endpoint,
+                    status: 'active'
+                };
+            });
+
+            return {
+                platform: 'YouTube',
+                date: change.date,
+                year: new Date(change.date).getFullYear(),
+                title: change.title || 'API Update', // Default title if none found
+                type: isDeprecation ? 'Deprecation' : 
+                      change.title.toLowerCase().includes('api') ? 'API Update' : 
+                      'Feature Update',
+
+                version_info: {
+                    applies_to: null,
+                    effective_date: null
+                },
+
+                endpoints: endpoints,
+                fields: [], // Could be enhanced to detect field changes
+
+                description: change.details[0] || '',
+                details: change.details.slice(1),
+                links: change.links,
+
+                flags: {
+                    is_deprecation: isDeprecation,
+                    is_breaking_change: isBreaking,
+                    requires_action: isBreaking
+                },
+
+                platform_specific: {
+                    products: ['YouTube Data API']
+                }
+            };
+        });
+
+    } catch (error) {
+        console.error('Error scraping YouTube changelog:', error.message);
+        return [];
     }
-
-    const yearData = {
-        year: year,
-        total_changes: changes.length,
-        last_updated: changes[0]?.date || 'Unknown',
-        changes: changes
-    };
-
-    // Save individual year file
-    const yearFilePath = path.join(OUTPUT_DIR, `changelog_${year}.json`);
-    fs.writeFileSync(yearFilePath, JSON.stringify(yearData, null, 2));
-    console.log(`Saved ${year} changelog to ${yearFilePath}`);
-
-    return yearData;
-}
-
-async function generateMasterChangelog(allYearData) {
-    const masterData = {
-        last_updated: new Date().toISOString(),
-        total_years: allYearData.length,
-        total_changes: allYearData.reduce((sum, year) => sum + year.total_changes, 0),
-        years: allYearData.sort((a, b) => b.year - a.year) // Sort newest first
-    };
-
-    const masterFilePath = path.join(OUTPUT_DIR, 'changelog_master.json');
-    fs.writeFileSync(masterFilePath, JSON.stringify(masterData, null, 2));
-    console.log(`Saved master changelog to ${masterFilePath}`);
 }
 
 async function main() {
     try {
         console.log('Starting changelog scraper...');
         
-        // Generate URLs for all years
-        const yearUrls = await generateYearUrls();
-        console.log(`Found ${yearUrls.length} years to scrape`);
-
-        // Launch browser
         const browser = await puppeteer.launch({
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -143,20 +300,38 @@ async function main() {
         const page = await browser.newPage();
         await page.setViewport({ width: 1280, height: 800 });
 
-        // Scrape each year
-        const allYearData = [];
-        for (const { year, url } of yearUrls) {
-            console.log(`\nProcessing year ${year}...`);
-            
-            const changes = await scrapeChangelog(page, url);
-            if (changes.length > 0) {
-                const yearData = await saveResults(year, changes);
-                allYearData.push(yearData);
-            }
+        // Scrape Meta changes
+        const currentYear = new Date().getFullYear();
+        let allChanges = [];
+
+        for (let year = START_YEAR; year <= currentYear; year++) {
+            const url = `${META_BASE_URL}${year}`;
+            const changes = await scrapeChangelog(page, url, year);
+            allChanges = allChanges.concat(changes);
         }
 
-        // Generate master changelog
-        await generateMasterChangelog(allYearData);
+        // Scrape YouTube changes
+        const youtubeChanges = await scrapeYouTubeChangelog(page);
+        allChanges = allChanges.concat(youtubeChanges);
+
+        // Sort all changes by date (newest first)
+        allChanges.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        // Create final data structure
+        const finalData = {
+            last_updated: new Date().toISOString(),
+            metadata: {
+                platforms: ['Meta', 'YouTube'],
+                years_covered: `${START_YEAR}-${currentYear}`,
+                total_changes: allChanges.length
+            },
+            changes: allChanges
+        };
+
+        // Save to JSON file
+        fs.writeFileSync(OUTPUT_FILE, JSON.stringify(finalData, null, 2));
+        console.log(`\nSaved changelog to ${OUTPUT_FILE}`);
+        console.log(`Total changes: ${finalData.metadata.total_changes}`);
 
         await browser.close();
         console.log('\nScraping completed successfully!');

@@ -14,6 +14,8 @@ const TYPE_COLORS = {
   'Deprecation': 'bg-red-100 text-red-800'
 };
 
+
+
 function App() {
   const [data] = useState(changelogData);
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -24,6 +26,34 @@ function App() {
     endDate: ''
   });
   
+  const [isScrapingInProgress, setIsScrapingInProgress] = useState(false);
+  const [lastUpdateError, setLastUpdateError] = useState(null);
+
+  const runScraper = async () => {
+    setIsScrapingInProgress(true);
+    setLastUpdateError(null);
+    
+    try {
+      const response = await fetch('http://localhost:3001/run-scraper', {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to run scraper');
+      }
+      
+      const updatedData = await response.json();
+      
+      // Reload the current data with new changes
+      window.location.reload();
+    } catch (error) {
+      setLastUpdateError(error.message);
+      console.error('Error running scraper:', error);
+    } finally {
+      setIsScrapingInProgress(false);
+    }
+  };
+
   // Sorting handler
   const requestSort = (key) => {
     let direction = 'asc';
@@ -78,6 +108,63 @@ function App() {
     });
   };
 
+  // Function to convert data to CSV and download
+  // Function to convert data to CSV and download
+const exportToCSV = () => {
+  // Define columns for export
+  const columns = [
+    'Announcement Date',
+    'Platform',
+    'Type',
+    'Impacted Module',
+    'Description',
+    'Links'
+  ];
+
+  // Convert the filtered data to CSV format
+  const csvData = sortedData.map(change => {
+    // Combine all links into one cell
+    const links = [
+      CHANGELOG_URLS[change.platform], // Announcement link
+      ...(change.links || []).map(link => link.url) // Other links
+    ].join(', ');
+
+    // Format the description: title + description + endpoints + more details
+    const fullDescription = [
+      change.title,
+      change.description,
+      change.endpoints?.map(e => `${e.method} ${e.path}`).join('\n'),
+      change.details?.length > 0 ? 'Additional Details:' : null,
+      change.details?.map(detail => `• ${detail}`).join('\n')
+    ].filter(Boolean).join('\n\n');
+
+    return [
+      new Date(change.date).toLocaleDateString(),
+      change.platform,
+      change.type,
+      '', // Impacted Module (currently empty)
+      fullDescription,
+      links
+    ].map(cell => `"${(cell || '').replace(/"/g, '""')}"`) // Escape quotes and wrap in quotes
+    .join(',');
+  });
+
+  // Add header row
+  const csv = [
+    columns.map(col => `"${col}"`).join(','),
+    ...csvData
+  ].join('\n');
+
+  // Create and trigger download
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', `changelog_export_${new Date().toISOString().split('T')[0]}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="max-w-full mx-2 py-6 px-4">
@@ -97,8 +184,32 @@ function App() {
                     Last updated: {new Date(data.last_updated).toLocaleString()}
                   </p>
                 </div>
-                <div className="text-sm text-gray-500">
-                  Total changes: {data.metadata.total_changes}
+                <div className="flex items-center gap-4">
+                  <div className="text-sm text-gray-500">
+                    Total changes: {data.metadata.total_changes}
+                  </div>
+                  <button
+                    onClick={() => runScraper()}
+                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 flex items-center gap-2"
+                  >
+                    {isScrapingInProgress ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                        Updating...
+                      </>
+                    ) : (
+                      'Update Changelog'
+                    )}
+                  </button>
+                  <button
+                    onClick={exportToCSV}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    Export to CSV
+                  </button>
                 </div>
               </div>
 

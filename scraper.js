@@ -5,7 +5,7 @@ const fs = require('fs');
 const META_BASE_URL = 'https://developers.facebook.com/docs/graph-api/changelog/non-versioned-changes/nvc-';
 const YOUTUBE_CHANGELOG_URL = 'https://developers.google.com/youtube/v3/revision_history';
 const START_YEAR = 2023;
-const OUTPUT_FILE = 'changelog.json';
+const OUTPUT_FILE = 'changelog-viewer/src/changelog.json';
 
 function determineChangeType(title, details) {
     // Helper function to categorize changes
@@ -253,7 +253,7 @@ async function scrapeYouTubeChangelog(page) {
                 platform: 'YouTube',
                 date: change.date,
                 year: new Date(change.date).getFullYear(),
-                title: change.title || 'API Update', // Default title if none found
+                title: `Release Notes ${change.date}`,
                 type: isDeprecation ? 'Deprecation' : 
                       change.title.toLowerCase().includes('api') ? 'API Update' : 
                       'Feature Update',

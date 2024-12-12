@@ -128,8 +128,8 @@ changelog-manager/
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/api-changelog-manager.git
-cd api-changelog-manager
+git clone https://github.com/satwik3011/changelog-manager.git
+cd changelog-manager
 ```
 
 2. Install dependencies:

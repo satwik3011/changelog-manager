@@ -2,6 +2,9 @@
 
 A unified platform for tracking and managing API changes across multiple platforms. Currently supports YouTube Data API and Meta Graph API changelogs.
 
+![API Changelog Manager Interface](screenshot.png)
+*Unified view of platform changes with filtering and detailed information*
+
 ## Why Is This Needed?
 
 ### Crisis Aversion & Risk Mitigation
@@ -33,56 +36,6 @@ A unified platform for tracking and managing API changes across multiple platfor
    - Quickly understand technical implications of changes
    - Plan necessary code updates
    - Prioritize work based on change criticality
-
-## Architecture Overview
-
-The system consists of two main components:
-1. A Node.js-based changelog scraper
-2. A React-based web interface
-
-```mermaid
-flowchart TB
-    subgraph Scraper ["Changelog Scraper (Node.js)"]
-        scraper[Puppeteer Scraper]
-        parser[HTML Parser]
-        formatter[JSON Formatter]
-        scraper --> parser
-        parser --> formatter
-    end
-
-    subgraph Sources ["Data Sources"]
-        youtube[YouTube Changelog]
-        meta[Meta Changelog]
-        future[Future Sources...]
-        youtube --> scraper
-        meta --> scraper
-        future -.-> scraper
-    end
-
-    subgraph Storage ["Data Layer"]
-        json[changelog.json]
-        formatter --> json
-    end
-
-    subgraph Frontend ["React Frontend"]
-        react[React App]
-        components[UI Components]
-        filters[Filters/Sort Logic]
-        json --> react
-        react --> components
-        react --> filters
-    end
-
-    classDef primary fill:#e1f5fe,stroke:#01579b
-    classDef secondary fill:#f3e5f5,stroke:#4a148c
-    classDef storage fill:#e8f5e9,stroke:#1b5e20
-    classDef source fill:#fff3e0,stroke:#e65100
-    
-    class Scraper primary
-    class Frontend secondary
-    class Storage storage
-    class Sources source
-```
 
 ## Features
 
